@@ -17,11 +17,13 @@ def main():
     parser.add_argument("--complexity", "-n", type=int, default=10, help="Complexity / samples per cycle (default: 10)")
     parser.add_argument("--alpha", "-a", type=float, default=0.5, help="Influence coefficient, 0 to 1 (default: 0.5)")
     parser.add_argument("--col", type=int, default=1, help="0-indexed column of data to apply noise to (default: 1)")
+    parser.add_argument("--seed", type=int, default=None, help="RNG seed for reproducible output")
+    parser.add_argument("--normalize", action="store_true", help="Divide eta by its exact mean so E[eta] = 1")
     parser.add_argument("--plot", action="store_true", help="Generate a PNG plot showcasing the comparison")
     
     args = parser.parse_args()
     
-    abs_model = SharmaABS(args.min, args.max, args.complexity)
+    abs_model = SharmaABS(args.min, args.max, args.complexity, seed=args.seed, normalize=args.normalize)
     
     ideal_data = []
     headers = []
@@ -66,8 +68,8 @@ def main():
         
     if args.plot:
         plt.figure(figsize=(10, 6))
-        plt.plot(ideal_data, label="Deterministic Ideal", linestyle='--', color='emerald')
-        plt.plot(noisy_data, label=f"Sharma ABS Obs (alpha={args.alpha}, n={args.complexity})", color='indigo', alpha=0.9)
+        plt.plot(ideal_data, label="Deterministic Ideal", linestyle='--', color='#10b981')
+        plt.plot(noisy_data, label=f"Sharma ABS Obs (alpha={args.alpha}, n={args.complexity})", color='#4f46e5', alpha=0.9)
         plt.title("Sharma Absolute Boundary Summation (ABS) Model")
         plt.xlabel("Sample")
         plt.ylabel("Value")
@@ -76,7 +78,7 @@ def main():
         
         plot_file = os.path.splitext(args.output_csv)[0] + '.png'
         plt.savefig(plot_file)
-        print(f"Plot correctly saved to {plot_file}")
+        print(f"Plot saved to {plot_file}")
 
 if __name__ == "__main__":
     main()
