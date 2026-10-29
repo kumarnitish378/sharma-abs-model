@@ -30,13 +30,20 @@ Controls
   SPACE pause   R reset   C clear trails   ESC quit
 
 Run:  pip install pygame    then    python examples/abs_vs_gaussian_demo.py
+      add --camera to draw every random number from your webcam's sensor noise
+      (needs opencv-python; --cam 1 for another camera, --fake-camera to test without one)
 """
+import argparse
 import math
 import os
 import random
+import sys
 from collections import deque
 
 import pygame
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from camera_entropy import CameraRandom, add_rng_args, make_entropy, source_label  # noqa: E402
 
 
 # ---------------------------------------------------------------- noise models
@@ -73,7 +80,7 @@ class Noise:
     def __init__(self, alpha, c, n, rng):
         self.alpha, self.c, self.n, self.rng = alpha, c, n, rng
         self.N = 2 * c * n
-        self.eta_mean, self.eta_sd = eta_stats(c, n, rng)
+        self.eta_mean, self.eta_sd = eta_stats(c, n, random.Random(0))   # stats only
         self.sigma = alpha * self.eta_sd / self.eta_mean   # sd of the normalised ABS multiplier
 
     def abs_mult(self):
@@ -156,10 +163,10 @@ class Track:
 
 
 class Sim:
-    def __init__(self):
+    def __init__(self, rng=None):
         self.alpha, self.n = DEFAULT
         self.bi = 1
-        self.rng = random.Random(2026)
+        self.rng = rng if rng is not None else random.Random(2026)
         self.reset()
 
     def reset(self):
@@ -296,13 +303,16 @@ def draw_hist(screen, sim, small):
 
 
 def main():
+    ap = add_rng_args(argparse.ArgumentParser(description="Sharma ABS vs Gaussian demo"))
+    args = ap.parse_args()
+    entropy = make_entropy(args)
     pygame.init()
     screen = pygame.display.set_mode((W, H))
     pygame.display.set_caption("Sharma ABS vs Gaussian noise")
     font = pygame.font.SysFont("dejavusans,arial", 18, bold=True)
     small = pygame.font.SysFont("dejavusansmono,consolas,monospace", 14)
     clock = pygame.time.Clock()
-    sim = Sim()
+    sim = Sim(CameraRandom(entropy) if entropy else None)
     paused, speed_i = False, 0
     frames = int(os.environ.get("ABS_DEMO_FRAMES", "0"))     # >0: headless test run
     if os.environ.get("ABS_DEMO_EXTREME"):
@@ -364,9 +374,12 @@ def main():
                   f"alpha {sim.alpha:.2f}   n {sim.n}   bounds [-{BOUNDS[sim.bi]},{BOUNDS[sim.bi]}]   |   "
                   f"both noises: mean 1, sd {nz.sigma:.4f}")
         screen.blit(small.render(status, True, TXT), (20, 6))
-        help_txt = ("UP/DOWN alpha   LEFT/RIGHT n   B bounds   X high-noise preset   "
-                    "F speed   SPACE pause   R reset   C clear")
+        help_txt = ("UP/DOWN alpha  LEFT/RIGHT n  B bounds  X high-noise  "
+                    "F speed  SPACE pause  R reset  C clear")
         screen.blit(small.render(help_txt, True, DIM), (20, H - 20))
+        src_txt = "random source: " + source_label(entropy)
+        screen.blit(small.render(src_txt, True, GREEN if entropy else DIM),
+                    (W - 20 - small.size(src_txt)[0], H - 20))
 
         pygame.display.flip()
         clock.tick(60)
@@ -374,6 +387,8 @@ def main():
         if frames and frame >= frames:
             pygame.image.save(screen, os.environ.get("ABS_DEMO_SHOT", "abs_vs_gaussian.png"))
             running = False
+    if entropy:
+        entropy.close()
     pygame.quit()
 
 

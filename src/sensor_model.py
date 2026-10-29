@@ -77,7 +77,7 @@ def n_for_sd(target_sd, shape="symmetric", n_max=64):
 
 class SensorModel:
     def __init__(self, accuracy, resolution=None, limits=(None, None),
-                 fixed_share=0.5, n=4, shape="symmetric", seed=None):
+                 fixed_share=0.5, n=4, shape="symmetric", seed=None, rng=None):
         """
         accuracy    : (rel, abs_) tuple, or a function x -> (rel, abs_) for range-dependent specs
         resolution  : output step (LSB), e.g. 0.01 m; None = no quantization
@@ -85,10 +85,12 @@ class SensorModel:
         fixed_share : 0..1, part of the error budget that is a fixed per-device error
         n           : ABS complexity; sets the typical/max error ratio (see n_for_sd)
         shape       : "symmetric", "skewed", or explicit ABS bounds (a, b)
+        rng         : random source with integers()/normal(), e.g. CameraNumpyRNG for
+                      camera noise; default numpy.random.default_rng(seed)
         """
         self.accuracy = accuracy if callable(accuracy) else (lambda x, a=accuracy: a)
         self.resolution, self.limits, self.f = resolution, limits, fixed_share
-        self.rng = np.random.default_rng(seed)
+        self.rng = rng if rng is not None else np.random.default_rng(seed)
         bounds = SHAPES[shape] if isinstance(shape, str) else shape
         self.u = UnitABS(n, bounds, self.rng)
         self.new_device()
