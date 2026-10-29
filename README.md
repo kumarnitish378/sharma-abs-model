@@ -108,6 +108,10 @@ custom = SensorModel(accuracy=(0.02, 0.1), resolution=0.01, limits=(0, 50))  # Â
 
 ![Datasheet sensor demo](docs/media/datasheet_sensor_demo.png)
 
+**Live demo** â€” `examples/live_sensor_demo.py`. Pick a sensor: `1` is a TFmini-S lidar tracking a moving target, `2` is a DS18B20 on a heater cycle, `3` is an INA219B measuring a motor load. Readings from the ABS model and from a Gaussian model with the same spread update live against the datasheet limit. Out-of-spec readings turn red and are counted. `LEFT`/`RIGHT` change n (n = 1 is a stress test), `S` switches between symmetric and skewed errors, and `D` swaps to a new physical unit. Add `--camera` to use webcam randomness.
+
+![Live sensor demo](docs/media/live_sensor_demo.png)
+
 **Limits.** Any bounded distribution would also keep readings in spec; ABS adds skew control and integer-only arithmetic. How much of the error budget is fixed per device (`fixed_share`) is an assumption, since datasheets don't state it. Datasheet accuracy applies only under the stated test conditions. Drift and temperature effects are not modelled.
 
 ## Demos (pygame)
