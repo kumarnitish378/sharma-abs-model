@@ -66,6 +66,28 @@ python tools/abs_gen.py ideal.csv noisy.csv --min -10 --max 10 -n 12 -a 0.5 --co
 ### Web dashboard
 Open `public/index.html` in a browser.
 
+## Demos (pygame)
+
+Install pygame with `pip install pygame`, then run either demo below.
+
+### With vs without ABS — `examples/abs_pygame_demo.py`
+
+Two rovers get identical wheel-speed commands and drive a figure-8. The right one has Sharma ABS noise on its wheel speeds. You can change α, n and the bounds live; the measured noise is shown next to the paper's prediction.
+
+![ABS demo](docs/media/abs_demo.gif)
+
+[Full video (MP4)](docs/media/abs_demo.mp4)
+
+### ABS vs Gaussian — `examples/abs_vs_gaussian_demo.py`
+
+There are three rovers: no noise, ABS noise, and Gaussian noise with the **same mean and standard deviation**. Only the shape of the noise differs:
+
+- **ABS is bounded and never negative**, so a wheel can never spin backwards.
+- **Gaussian is unbounded**, so at high noise it sometimes gives M < 0. The wheel then "reverses", which a real motor at a constant command doesn't do. The demo counts these events.
+- At low noise or large n the two behave almost the same. Press **X** to switch to the high-noise preset (α = 1, n = 1).
+
+![ABS vs Gaussian](docs/media/abs_vs_gaussian.png)
+
 ## Reproducing the paper
 
 ```bash
