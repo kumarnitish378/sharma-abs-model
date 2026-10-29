@@ -91,3 +91,16 @@ for _ in range(200):
     y = noisy(v, -10, 10, 48, 0.5)
     hits += (y > 5).any(); neg += (y < 0).any()
 print(f"ADC example: runs exceeding 5 V = {hits}/200, runs below 0 V = {neg}/200")
+
+# ---- Table: skew is set by the bounds (centred eta, exact)
+rows = []
+for a, b in [(-10, 10), (-10, 100), (10, 100), (50, 100), (900, 1000)]:
+    cells = []
+    for n in (1, 4, 16):
+        e, p = eta_support(a, b, n)
+        mu = float(p @ e)
+        var = float(p @ (e - mu) ** 2)
+        cells.append(f"{float(p @ (e - mu) ** 3) / var ** 1.5:+.3f}")
+    rows.append(f"$[{a},{b}]$ & " + " & ".join(cells) + " \\\\")
+open(f"{TAB}/skew.tex", "w").write("\n".join(rows) + "\n")
+print("skew table written")

@@ -2,6 +2,7 @@
 \usepackage[margin=2.2cm]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs,graphicx,caption}
+\usepackage{xurl}
 \usepackage[hidelinks]{hyperref}
 \usepackage{microtype}
 
@@ -41,9 +42,16 @@ its mean and variance, and show that $\eta$ is the reciprocal transform of a sca
 Irwin--Hall variate. A practical consequence is that the noise amplitude is set by $n$ and
 $\alpha$, and is almost independent of the bounds $[a,b]$, which only set the quantization.
 $\eta$ has a positive bias, $\E[\eta]>1$, which we quantify and remove by an exact
-normalization. We provide floating-point and integer-only (Q16.16) implementations and
-reproducible experiments, and state the model's limitations: it produces white, thin-tailed
-noise, and it does not replace coherent noise or heavy-tailed financial models.
+normalization. Shifting the bounds away from zero controls the skew, from about $+0.9$ down
+to nearly symmetric. We use these properties to build a datasheet-calibrated sensor model
+whose simulated readings never exceed the manufacturer's accuracy limit; Gaussian noise with
+the same spread exceeds it on up to $0.9\%$ of readings in a stress test. Compared with other
+bounded generators, ABS is not the most flexible (Beta distributions cover more shapes), but
+it is the only one in our comparison that is integer-only, constant-time and skew-adjustable,
+at about one fifth of the cost of Beta-distributed noise on our test host. We provide
+floating-point and integer-only (Q16.16) implementations and reproducible experiments, and
+state the model's limitations: it produces white, thin-tailed noise, and it does not replace
+coherent noise or heavy-tailed financial models.
 \end{abstract}
 
 \section{Introduction}
@@ -65,7 +73,11 @@ Irwin--Hall distribution (Sections~\ref{sec:dist}--\ref{sec:ih});
 \item design rules for $n$ and $\alpha$, and an exact bias correction
 (Section~\ref{sec:design});
 \item float and integer-only implementations with an unbiased integer sampler, and
-reproducible experiments (Sections~\ref{sec:impl}--\ref{sec:exp}).
+reproducible experiments (Sections~\ref{sec:impl}--\ref{sec:exp});
+\item skew control through the bounds, and a datasheet-calibrated sensor model that never
+exceeds the stated accuracy limit (Sections~\ref{sec:ih} and \ref{sec:sensor});
+\item a comparison with other bounded generators on cost, determinism and attainable shapes
+(Section~\ref{sec:compare}).
 \end{enumerate}
 We aim for a small, well-characterized engineering tool, and we state where it should not be
 used (Section~\ref{sec:limits}).
@@ -197,6 +209,27 @@ therefore close to standard multiplicative near-Gaussian noise, $1-Z/\sqrt{12n}$
 order. The reciprocal adds a positive skew and keeps the factor positive and bounded, which
 the plain Gaussian form does not.
 
+\paragraph{The bounds set the skew.} Symmetric bounds leave the noise \emph{amplitude} almost
+unchanged, but moving the bounds away from zero changes its \emph{shape}. With narrow positive
+bounds, $X=S/N$ stays in a short interval around $\mu_X>0$ where $1/(1+X)$ is nearly linear,
+so $\eta$ is nearly symmetric. Table~\ref{tab:skew} gives the exact skewness of $\eta$: from
+about $+0.8$ for $[-10,10]$ down to $+0.03$ for $[900,1000]$. Negative skew is obtained by
+mirroring, $2\E[\eta]-\eta$. A single integer generator therefore covers both symmetric and
+right- or left-skewed bounded noise; we use this in Section~\ref{sec:sensor}.
+
+\begin{table}[h]
+\centering\small
+\caption{Exact skewness of $\eta$ for several bounds.}
+\label{tab:skew}
+\begin{tabular}{lrrr}
+\toprule
+Bounds $[a,b]$ & $n=1$ & $n=4$ & $n=16$\\
+\midrule
+\inputtable tables/skew.tex
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Design rules}\label{sec:design}
 
 \paragraph{Amplitude.} By \eqref{eq:apply}, the multiplier $M=1+\alpha(\eta-1)$ has
@@ -217,9 +250,11 @@ $\tilde\eta=\eta/\E[\eta]$ with $\E[\eta]$ computed exactly once on the host (Se
 Then $\E[\tilde\eta]=1$, $\E[M]=1$, and positivity is unchanged. For $[-10,10]$, $n=12$, the
 constant is $1.0078$.
 
-\paragraph{Bounds.} Use symmetric bounds unless a bias is wanted. Choose $c$ only for
+\paragraph{Bounds.} For amplitude, symmetric bounds $[-c,c]$ with $c$ chosen only for
 resolution: the factor has $2nc+1$ levels, which matters only for very small $c$
-(e.g.\ $c=1$, $n=12$ gives 25 levels).
+(e.g.\ $c=1$, $n=12$ gives 25 levels). For shape, shift the bounds
+(Table~\ref{tab:skew}): narrow positive bounds such as $[900,1000]$ give nearly symmetric
+noise, bounds around zero give right-skewed noise.
 
 \section{Implementation}\label{sec:impl}
 The reference C implementation is a single header with no dependencies beyond
@@ -228,7 +263,9 @@ The reference C implementation is a single header with no dependencies beyond
 \item a seeded xorshift32 generator \cite{marsaglia}, with a re-entrant variant that takes
 the state as an argument (for ISRs and threads);
 \item Lemire's multiply-shift method with rejection \cite{lemire} to draw unbiased integers
-on $[a,b]$. The earlier \texttt{rand() \% m} has modulo bias and was never seeded;
+on $[a,b]$. The earlier \texttt{rand() \% m} has modulo bias and was never seeded. A redraw
+happens with probability below $m/2^{32}$ per value; where strictly constant time is required,
+the rejection step can be dropped at a bias of the same negligible size;
 \item an integer-only path that returns $\eta$ in Q16.16 format. When $N<2^{16}$ it needs one
 32-bit unsigned division, which is a single instruction on Cortex-M3/M4/M7. Otherwise it
 falls back to a 64-bit division;
@@ -362,6 +399,140 @@ is not. Right: damped oscillation. Bias-corrected $\eta$ in both.}
 \label{fig:apps}
 \end{figure}
 
+\section{Application: datasheet-calibrated sensor simulation}\label{sec:sensor}
+Sensor datasheets state accuracy as a hard limit, for example ``$\pm$6\,cm up to 6\,m,
+$\pm$1\% from 6 to 12\,m''. A simulated sensor should never report an error a compliant unit
+cannot produce. Because $\eta$ is bounded, it can be turned into a \emph{unit error variable}
+\begin{equation}
+u=\frac{\eta-\E[\eta]}{D},\qquad D=\max\bigl(\eta_{\max}-\E[\eta],\ \E[\eta]-\eta_{\min}\bigr),
+\end{equation}
+with $\E[u]=0$ and $|u|\le1$ for every outcome. A reading of a true value $x$ is then
+\begin{equation}
+y=\operatorname{Q}\!\Bigl(x+|x|\,r\,[f g+(1-f)u_1]+e\,[f o+(1-f)u_2]\Bigr),
+\label{eq:sensor}
+\end{equation}
+where $r$ and $e$ are the datasheet's relative and absolute accuracy (which may depend on
+$x$), $g$ and $o$ are gain and offset errors drawn once per simulated unit, $u_1,u_2$ are
+drawn per reading, $f\in[0,1]$ is the share of the error budget fixed per unit, and
+$\operatorname{Q}$ rounds to the resolution and clips to the range. All four variables are unit
+ABS draws.
+
+\begin{proposition}[Datasheet compliance]
+Every reading from \eqref{eq:sensor} satisfies $|y-x|\le r|x|+e+\delta/2$, where $\delta$ is
+the resolution, for any realisation of the random draws.
+\end{proposition}
+\begin{proof}
+$|fg+(1-f)u_1|\le f+(1-f)=1$ and likewise for the offset term, because $|g|,|o|,|u_1|,|u_2|\le1$.
+Rounding adds at most $\delta/2$, and clipping to the range can only move the reading towards
+$x$ when $x$ lies inside the range.
+\end{proof}
+
+The guarantee needs only boundedness, not ABS in particular (Section~\ref{sec:compare});
+ABS contributes integer-only evaluation and the skew control of Table~\ref{tab:skew}.
+Table~\ref{tab:presets} lists the presets in the code, with accuracy figures taken from the
+manufacturers' documents \cite{tfmini,ds18b20,ina219}. Over 200 simulated units and
+$2000$ readings each per preset, with $n=4$, the worst error was 60--81\% of the limit for
+both shapes.
+
+\begin{table}[h]
+\centering\small
+\caption{Sensor presets. Accuracy figures from the manufacturers' documents.}
+\label{tab:presets}
+\begin{tabular}{lll}
+\toprule
+Sensor & Accuracy & Resolution\\
+\midrule
+Benewake TFmini-S lidar \cite{tfmini} & $\pm$6\,cm (0.1--6\,m), $\pm$1\% (6--12\,m) & 1\,cm\\
+DS18B20 thermometer \cite{ds18b20} & $\pm$0.5\,$^\circ$C ($-10$ to $+85\,^\circ$C) & 0.0625\,$^\circ$C\\
+INA219B current, 0.1\,$\Omega$ shunt \cite{ina219} & 0.5\% gain + 100\,$\mu$V offset & --\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:sensor} stresses the TFmini-S model with $n=1$, so that errors come close to
+the limit, and compares it with a model that has the same per-unit and per-reading spread but
+Gaussian shape. Over 30 units $\times$ 400 readings, the ABS model reached 94\% of the limit and
+never exceeded it; the Gaussian model exceeded it on 0.93\% of readings, by up to 45\%. Over
+100 units $\times$ 2000 readings, the Gaussian out-of-spec rate was 0.92\% at $n=1$, 0.02\% at
+$n=2$ and 0 at $n\ge4$; the ABS rate was 0 in every case. The difference therefore matters when
+simulated noise is pushed towards the datasheet limit, which is exactly the regime of interest
+for testing firmware tolerance checks.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/datasheet_sensor.png}
+\caption{TFmini-S stress test ($n=1$): reading error against true distance for 30 simulated
+units. Green band: datasheet limit. Red: readings outside it.}
+\label{fig:sensor}
+\end{figure}
+
+\section{Comparison with other bounded generators}\label{sec:compare}
+A reviewer may fairly ask why ABS should be used instead of a standard bounded distribution.
+We compare it with Irwin--Hall sums \cite{irwin,hall}, clipped and truncated Gaussians,
+Beta distributions (sampled from two gamma variates \cite{marsagliatsang}) and the triangular
+distribution, all driven by the same xorshift32 generator.
+
+\paragraph{Cost and determinism.} Table~\ref{tab:cost} gives host throughput (same setup as
+Table~\ref{tab:bench}; range over two runs of three repetitions) together with the properties
+that matter on microcontrollers: integer-only arithmetic, and a fixed amount of work per
+sample, which bounds worst-case execution time. Truncated Gaussian and Beta samplers use
+rejection loops; we observed up to 16 and 5 redraws respectively.
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Bounded generators on the same RNG (host CPU, ns per sample). $^{*}$Apart from the
+rare redraw in unbiased integer sampling (Section~\ref{sec:impl}).}
+\label{tab:cost}
+\begin{tabular}{p{3.4cm}lp{2.6cm}p{2.6cm}p{3.0cm}}
+\toprule
+Generator & ns/sample & Integer-only & Fixed work & Skew control\\
+\midrule
+\inputtable tables/cost.tex
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Attainable shapes.} Normalising every distribution to mean 0 and maximum $|u|=1$,
+Figure~\ref{fig:coverage} and Table~\ref{tab:coverage} show which combinations of spread and
+skew each family can produce. Beta distributions cover the widest region; truncated
+Gaussians cover a broad central region; ABS covers skewness up to about $\pm1$ over a wide
+range of spreads; Irwin--Hall is restricted to zero skew and the triangular family to a
+narrow strip.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{figs/bounded_coverage.png}
+\caption{Spread and skewness attainable by each bounded family (mean 0, maximum $|u|=1$).
+ABS points are coloured by $n$.}
+\label{fig:coverage}
+\end{figure}
+
+\begin{table}[h]
+\centering\small
+\caption{Range of spread (sd relative to the bound) and skewness per family.}
+\label{tab:coverage}
+\begin{tabular}{lll}
+\toprule
+Family & sd / bound & Skewness\\
+\midrule
+\inputtable tables/coverage.tex
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Fitting data.} The repository includes a script that fits every family to measured
+sensor errors by matching skewness and kurtosis, scores each fit with the Kolmogorov--Smirnov
+distance, and reports the fraction of data outside each fitted bound. On synthetic test data,
+all families fit Gaussian-like errors comparably; on right-skewed bounded errors the Beta fit
+was best, with ABS and the truncated Gaussian close behind. Fits to real sensor measurements
+are future work.
+
+\paragraph{Summary.} ABS is neither the most flexible bounded generator (Beta is) nor the
+cheapest for symmetric noise (Irwin--Hall is slightly faster). Its niche is the combination of
+integer-only arithmetic, a fixed amount of work per sample and adjustable skew, which none of
+the other generators in Table~\ref{tab:cost} provides together, at about one fifth of the host
+cost of Beta sampling.
+
 \section{Limitations and scope}\label{sec:limits}
 \begin{itemize}
 \item \textbf{White noise only.} Successive values of $\eta$ are independent. ABS is not a
@@ -372,8 +543,12 @@ lighter than Gaussian. It is not suitable for heavy-tailed phenomena such as lar
 market moves \cite{mandelbrot}.
 \item \textbf{Upper limits are not respected.} Positivity holds, but the multiplier can reach
 $1+\alpha$.
-\item \textbf{Bias and skew.} $\E[\eta]>1$ and the distribution is right-skewed, especially
-for small $n$. The bias is removable (Section~\ref{sec:design}); the skew is not.
+\item \textbf{Bias and skew.} $\E[\eta]>1$ and, for bounds around zero, the distribution is
+right-skewed. The bias is removable (Section~\ref{sec:design}) and the skew is adjustable
+through the bounds (Table~\ref{tab:skew}), but ABS cannot reach the extreme shapes that Beta
+distributions can (Section~\ref{sec:compare}).
+\item \textbf{Evidence so far.} Costs were measured on a desktop CPU, and the sensor model
+has been validated against datasheet limits, not yet against measured sensor errors.
 \item \textbf{Randomness quality.} The statistical guarantees assume independent uniform
 draws; xorshift32 is adequate for simulation but is not cryptographic.
 \end{itemize}
@@ -383,14 +558,17 @@ The Sharma ABS factor is a simple multiplicative noise generator with provable g
 is always defined when $b\ne0$, strictly positive, bounded, and preserves the sign of the
 signal for $\alpha\le1$. Its exact distribution is a finite sum, its amplitude is governed by
 $n$ and $\alpha$ rather than by the bounds, and its positive bias can be removed exactly. To
-first order it behaves like Irwin--Hall multiplicative noise. Its value lies in combining
-these guarantees with integer-only arithmetic, rather than in raw speed on hosts with an FPU.
-Future work is to measure cycle counts on Cortex-M targets and to add a correlated (filtered)
-variant.
+first order it behaves like Irwin--Hall multiplicative noise, and its bounds set its skew.
+Used as a datasheet-calibrated sensor model, it never produces readings outside the stated
+accuracy limit. Among bounded generators it trades some flexibility (compared with Beta) for
+integer-only, fixed-cost evaluation with adjustable skew. Future work is to measure cycle
+counts on Cortex-M targets, to fit the model to measured sensor errors, and to add a
+correlated (filtered) variant.
 
 \section*{Code and data availability}
-Source code (C header, Python, CLI) and all scripts that generate the tables and figures
-are available under the MIT License at
+Source code (C header, Python, CLI), the sensor model, the bounded-generator comparison,
+interactive demos, and all scripts that generate the tables and figures are available under
+the MIT License at
 \url{https://github.com/kumarnitish378/sharma-abs-model}.
 
 \section*{How to cite}
@@ -421,8 +599,16 @@ Algorithms}, 3rd ed., Addison-Wesley, 1997.
 \bibitem{mandelbrot} B.~Mandelbrot, ``The variation of certain speculative prices,''
 \emph{J. Business}, 36(4):394--419, 1963.
 \bibitem{marsaglia} G.~Marsaglia, ``Xorshift RNGs,'' \emph{J. Stat. Softw.}, 8(14), 2003.
+\bibitem{marsagliatsang} G.~Marsaglia and W.~W. Tsang, ``A simple method for generating gamma
+variables,'' \emph{ACM Trans. Math. Softw.}, 26(3):363--372, 2000.
 \bibitem{perlin} K.~Perlin, ``An image synthesizer,'' \emph{SIGGRAPH Comput. Graph.},
 19(3):287--296, 1985.
+\bibitem{tfmini} Benewake, \emph{TFmini-S LiDAR Module Datasheet}.
+\url{https://cdn.sparkfun.com/assets/1/3/a/3/c/TFmini-S_LiDAR_Module_Datasheet.pdf}
+\bibitem{ds18b20} Analog Devices (Maxim Integrated), \emph{DS18B20 Programmable Resolution
+1-Wire Digital Thermometer}.
+\bibitem{ina219} Texas Instruments, \emph{INA219 Zero-Drift, Bidirectional Current/Power
+Monitor with I$^2$C Interface}. \url{https://www.ti.com/product/ina219}
 \end{thebibliography}
 
 \end{document}
