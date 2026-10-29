@@ -66,6 +66,50 @@ python tools/abs_gen.py ideal.csv noisy.csv --min -10 --max 10 -n 12 -a 0.5 --co
 ### Web dashboard
 Open `public/index.html` in a browser.
 
+## Datasheet-calibrated sensor model (`src/sensor_model.py`)
+
+Datasheets give accuracy as a hard limit, for example "±6 cm up to 6 m, ±1% up to 12 m". `SensorModel` takes those numbers directly and produces readings whose error **never exceeds the datasheet limit** (plus half a step of rounding), because the ABS factor is bounded.
+
+```
+reading = quantize( clip( true value + per-device error + per-sample noise ) )
+```
+
+- **Per-device error** (gain and offset) is drawn once per simulated unit. Call `new_device()` to get a different physical unit.
+- **Per-sample noise** is drawn on every reading.
+- **`n` sets the noise level.** Smaller n puts more readings near the limit. `n_for_sd(typical / max)` matches a datasheet that gives both a typical and a max error.
+- **`shape` sets the skew.** `"symmetric"` uses narrow positive ABS bounds and suits "±" specs. `"skewed"` uses bounds around zero and suits errors that lean one way. Bounds control the *shape* of ABS noise, even though they barely affect its *size*.
+
+```python
+import sys; sys.path.append("src")
+from sensor_model import SensorModel, tfmini_s, ds18b20, ina219b_current
+
+lidar = tfmini_s(seed=1)                 # Benewake TFmini-S preset
+lidar.read([0.5, 3.2, 9.8])              # readings in metres
+lidar.new_device()                       # a different physical unit
+
+custom = SensorModel(accuracy=(0.02, 0.1), resolution=0.01, limits=(0, 50))  # ±(2% of reading + 0.1)
+```
+
+**Presets.** Numbers are from the manufacturers' datasheets or product pages:
+
+| Preset | Accuracy | Resolution | Source |
+|---|---|---|---|
+| `tfmini_s` | ±6 cm (0.1–6 m), ±1% (6–12 m) | 1 cm | [Benewake TFmini-S datasheet](https://cdn.sparkfun.com/assets/1/3/a/3/c/TFmini-S_LiDAR_Module_Datasheet.pdf) |
+| `ds18b20` | ±0.5 °C (−10 to +85 °C) | 0.0625 °C (12-bit) | [Analog Devices DS18B20](https://partsbox.com/ecdb/ds18b20-plus-digital-thermometer-analog-devices.html) |
+| `ina219b_current` | 0.5% gain error, plus 100 µV offset / shunt | — | [TI INA219](https://www.ti.com/product/ina219) |
+
+**ABS vs Gaussian against the datasheet limit.** `examples/datasheet_sensor_demo.py` simulates TFmini-S units, with Gaussian noise of the same spread for comparison:
+
+| Noise level | ABS out of spec | Gaussian out of spec |
+|---|---|---|
+| n = 1 (stress test) | 0% | 0.92% |
+| n = 2 | 0% | 0.02% |
+| n ≥ 4 | 0% | 0% |
+
+![Datasheet sensor demo](docs/media/datasheet_sensor_demo.png)
+
+**Limits.** Any bounded distribution would also keep readings in spec; ABS adds skew control and integer-only arithmetic. How much of the error budget is fixed per device (`fixed_share`) is an assumption, since datasheets don't state it. Datasheet accuracy applies only under the stated test conditions. Drift and temperature effects are not modelled.
+
 ## Demos (pygame)
 
 Install pygame with `pip install pygame`, then run either demo below.
