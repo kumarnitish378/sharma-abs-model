@@ -20,6 +20,9 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 from sensor_model import tfmini_s  # noqa: E402
+from camera_entropy import CameraNumpyRNG, add_rng_args, make_entropy, source_label  # noqa: E402
+
+RNG = None   # set to a CameraNumpyRNG by --camera
 
 
 class GaussianDraws:
@@ -37,7 +40,7 @@ def simulate(gaussian, n=1, devices=30, reads=400, seed=7):
     rng = np.random.default_rng(seed)
     xs, errs, lims = [], [], []
     for d in range(devices):
-        s = tfmini_s(seed=seed * 1000 + d, n=n)
+        s = tfmini_s(seed=seed * 1000 + d, n=n, rng=RNG)
         if gaussian:
             s.u = GaussianDraws(s.u.sd, s.rng)
             s.new_device()
@@ -71,13 +74,24 @@ def main(out="datasheet_sensor_demo.png"):
     fig.savefig(out, dpi=150)
 
     print("\nout-of-spec readings vs noise level (more n = gentler noise):")
+    devices, reads = (100, 2000) if RNG is None else (10, 500)   # camera bytes are slower
     for n in (1, 2, 4, 8):
         rows = []
         for g in (False, True):
-            _, e, lim = simulate(g, n=n, devices=100, reads=2000, seed=11)
+            _, e, lim = simulate(g, n=n, devices=devices, reads=reads, seed=11)
             rows.append(np.mean(np.abs(e) > lim + 1e-12) * 100)
         print(f"  n={n}:  ABS {rows[0]:.3f}%   Gaussian {rows[1]:.3f}%")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    import argparse
+    ap = add_rng_args(argparse.ArgumentParser(description="datasheet sensor demo"))
+    ap.add_argument("out", nargs="?", default="datasheet_sensor_demo.png")
+    a = ap.parse_args()
+    ent = make_entropy(a)
+    if ent:
+        RNG = CameraNumpyRNG(ent)
+    main(a.out)
+    print("random source:", source_label(ent))
+    if ent:
+        ent.close()

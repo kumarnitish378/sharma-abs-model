@@ -22,13 +22,20 @@ Controls
   SPACE pause   R reset   C clear trails   ESC quit
 
 Run:  pip install pygame    then    python examples/abs_pygame_demo.py
+      add --camera to draw every random number from your webcam's sensor noise
+      (needs opencv-python; --cam 1 for another camera, --fake-camera to test without one)
 """
+import argparse
 import math
 import os
 import random
+import sys
 from collections import deque
 
 import pygame
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from camera_entropy import CameraRandom, add_rng_args, make_entropy, source_label  # noqa: E402
 
 # ---------------------------------------------------------------- ABS model
 class ABS:
@@ -96,9 +103,9 @@ def command(t):
 
 
 class Sim:
-    def __init__(self):
+    def __init__(self, rng=None):
         self.alpha, self.n, self.bi, self.normalize = 0.6, 4, 1, True
-        self.rng = random.Random(2026)
+        self.rng = rng if rng is not None else random.Random(2026)
         self.reset()
 
     def reset(self):
@@ -221,13 +228,16 @@ def draw_hist(screen, sim, small):
 
 
 def main():
+    ap = add_rng_args(argparse.ArgumentParser(description="Sharma ABS with/without demo"))
+    args = ap.parse_args()
+    entropy = make_entropy(args)
     pygame.init()
     screen = pygame.display.set_mode((W, H))
     pygame.display.set_caption("Sharma ABS Model - with vs without noise")
     font = pygame.font.SysFont("dejavusans,arial", 20, bold=True)
     small = pygame.font.SysFont("dejavusansmono,consolas,monospace", 14)
     clock = pygame.time.Clock()
-    sim = Sim()
+    sim = Sim(CameraRandom(entropy) if entropy else None)
     paused, speed_i = False, 0
     frames = int(os.environ.get("ABS_DEMO_FRAMES", "0"))  # >0: headless test run
 
@@ -288,6 +298,9 @@ def main():
         screen.blit(small.render(meas, True, AMBER), (W - 20 - small.size(meas)[0], 6))
         help_txt = "UP/DOWN alpha  LEFT/RIGHT n  B bounds  M mean-corr  F speed  SPACE pause  R reset  C clear"
         screen.blit(small.render(help_txt, True, DIM), (20, H - 18))
+        src_txt = "random source: " + source_label(entropy)
+        screen.blit(small.render(src_txt, True, GREEN if entropy else DIM),
+                    (W - 20 - small.size(src_txt)[0], H - 18))
 
         pygame.display.flip()
         clock.tick(60)
@@ -295,6 +308,8 @@ def main():
         if frames and frame >= frames:
             pygame.image.save(screen, os.environ.get("ABS_DEMO_SHOT", "abs_demo.png"))
             running = False
+    if entropy:
+        entropy.close()
     pygame.quit()
 
 

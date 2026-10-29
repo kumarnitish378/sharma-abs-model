@@ -132,6 +132,39 @@ There are three rovers: no noise, ABS noise, and Gaussian noise with the **same 
 
 ![ABS vs Gaussian](docs/media/abs_vs_gaussian.png)
 
+## Camera random numbers (`src/camera_entropy.py`)
+
+The simulations can draw their random numbers from a **webcam's sensor noise** instead of a software generator.
+
+**How it works.** Take the least significant bit of every unsaturated pixel, which is dominated by photon shot noise and thermal noise. Then condition it with SHA-256: 128 raw bytes go in and 32 bytes come out, chained to the previous hash. A background thread keeps a pool of these bytes ready.
+
+```python
+import sys; sys.path.append("src")
+from camera_entropy import CameraEntropy, CameraRandom, CameraNumpyRNG
+
+ent = CameraEntropy(cam=0)          # or CameraEntropy(fake=True) to test without a camera
+rng = CameraRandom(ent)             # a random.Random: randint, gauss, shuffle, ... from the camera
+nrng = CameraNumpyRNG(ent)          # integers(), normal(), random() for numpy-style code
+```
+
+**Live quality monitor** — `examples/camera_trng.py`. It shows the camera feed, the raw LSB bit-plane, a polar byte histogram (a circle means uniform), a polar scatter, and entropy and chi-square statistics over time. Press `W` to compare raw and conditioned bits, and `S` to save 1 MB for external tests (`ent`, `dieharder`).
+
+![Camera RNG monitor](docs/media/camera_trng.png)
+
+*The screenshot uses the simulated source (`--fake`); a real camera's raw bits show more structure.*
+
+**Use camera randomness in the simulations.** Add `--camera` (or `--cam 1` for another camera, or `--fake-camera` to test without one):
+
+```bash
+python examples/abs_vs_gaussian_demo.py --camera
+python examples/abs_pygame_demo.py --camera
+python examples/datasheet_sensor_demo.py --camera
+```
+
+The current random source and the amount of camera data used are shown on screen. For `SensorModel`, pass `rng=CameraNumpyRNG(ent)`.
+
+**Limits.** This is a learning and simulation tool, not a certified TRNG: it has no NIST SP 800-90B health tests or validated entropy estimate. Runs are not reproducible, because there is no seed. Camera throughput (hundreds of KB/s) is far below a software RNG, so large batch runs are slower.
+
 ## Reproducing the paper
 
 ```bash
